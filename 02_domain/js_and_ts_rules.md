@@ -2,15 +2,100 @@
 
 Keep your explanations brief and to the point.
 
+## Code Simplicity and Readability
+
+The primary goal is to write code that is easy to understand and maintain. Code is read far more often than it is written. Prioritize clarity for your future self and for your teammates over cleverness or premature optimization.
+
+### Prefer Simplicity Over "Clever" Code
+Avoid "clever" one-liners or overly complex expressions that require a reader to pause and decipher them. If a piece of logic is complex, it's better to write it out in a more verbose but straightforward way. A developer should be able to understand the intent of a piece of code within seconds.
+
+**Instead of this (clever but dense):**
+```ts
+const activeAdmins = users.filter(u => u.active && u.role === 'admin').map(u => ({...u, name: u.name.toUpperCase()})).sort((a, b) => b.posts - a.posts);
+```
+
+**Prefer this (clear and sequential):**
+```ts
+const activeAdmins = users.filter(user => user.active && user.role === 'admin');
+
+const capitalizedAdmins = activeAdmins.map(user => ({
+  ...user,
+  name: user.name.toUpperCase(),
+}));
+
+const sortedAdmins = capitalizedAdmins.sort((a, b) => b.posts - a.posts);
+```
+
+### Embrace "WET" Programming Before Abstracting
+Counter to the well-known "DRY" (Don't Repeat Yourself) principle, it's often better to "Write Everything Twice" (or even three times). Rushing to create an abstraction for the first instance of code duplication can lead to the *wrong* abstraction, which is more costly to fix than duplicated code.
+
+By allowing a little duplication, the true, underlying pattern will emerge more clearly. Once you've written similar logic for the third time, you'll have a much better understanding of the requirements and can create a more robust and accurate abstraction. At that point, you should prefer iteration and modularization over continued code duplication.
+
+### Keep Abstractions Shallow
+When you do abstract complex logic into helper functions, avoid creating deep chains of function calls. A function that calls a helper, which calls another helper, which calls *another* helper, becomes fragmented and difficult to trace. This can hide the core logic and make debugging painful.
+
+For most applications, a single layer of abstraction is sufficient. If a helper function becomes so complex that it needs its own helpers, consider if the initial function can be simplified or if the helper is trying to do too much. The goal is to create small, pure functions with descriptive names and few parameters, but not to create a maze of them.
+
+**Avoid this (deeply nested abstractions):**
+```ts
+// Hard to follow the flow of data and logic
+function mainOperation(data) {
+  const processedData = processStepOne(data);
+  return finalize(processedData);
+}
+
+function processStepOne(data) {
+  const validated = validate(data);
+  return transform(validated);
+}
+
+function validate(data) {
+  // ...validation logic...
+}
+
+function transform(data) {
+  // ...transformation logic...
+}
+
+function finalize(data) {
+  // ...final steps...
+}
+```
+
+**Prefer this (shallow, focused helpers):**
+```ts
+function mainOperation(data) {
+  // Core logic is clear and easy to read
+  if (!isValid(data)) {
+    throw new Error("Invalid data");
+  }
+
+  const transformedData = transformData(data);
+  const result = performFinalCalculation(transformedData);
+
+  return result;
+}
+
+// Helper for a genuinely complex, self-contained task
+function transformData(data) {
+  // ...transformation logic is isolated here...
+  return transformed;
+}
+
+// Another helper for a distinct step
+function performFinalCalculation(data) {
+  // ...calculation logic...
+  return calculation;
+}
+```
+
 ## General Rules
 
 - Use descriptive variable and function names
 - Use functional and declarative programming patterns; avoid unnecessary classes except for state machines
-- Prefer iteration and modularization over code duplication
 - Use TypeScript for all code; prefer types over interfaces
 - Implement proper lazy loading for images and other assets
 - Wherever appropriate, opt for early returns as opposed to multiple or nested if/else conditions or switch statements
-- Prefer to abstract complicated logic into small pure functions with descriptive names and few parameters as necessary
 
 ### Accessibility
 
