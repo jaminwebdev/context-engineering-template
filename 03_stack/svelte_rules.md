@@ -361,24 +361,66 @@ let expensiveComputation = $derived.by(() => {
 
 ## Error Handling
 
-### 1. Consistent Error Patterns
+### 1. Using <svelte:boundary> for Component-Level Error Catching
 
-```typescript
-interface ErrorState {
-  message: string;
-  code?: string;
-  retry?: () => void;
-}
+To prevent a single component's error from crashing an entire page, use the `<svelte:boundary>` element. It acts like a try-catch block for the component tree.
 
-const createErrorHandler = (fallback: string) => {
-  return (error: unknown): ErrorState => {
-    if (error instanceof Error) {
-      return { message: error.message };
-    }
-    return { message: fallback };
-  };
-};
+- **Catches runtime errors** during initialization, updates, and in event handlers.
+- **Provides a fallback UI** that you define.
+- **Exposes the error object** to the fallback slot.
+
+**Rule:** Wrap any component that performs risky operations (e.g., complex data parsing, third-party library interactions) in a `<svelte:boundary>`.
+
+**Example:**
+
+```html
+<script lang="ts">
+	import PotentiallyCrashingComponent from './PotentiallyCrashingComponent.svelte';
+	import FallbackUI from './FallbackUI.svelte';
+</script>
+
+<h1>My Application</h1>
+
+<svelte:boundary>
+	<PotentiallyCrashingComponent />
+
+	<div slot="fallback" let:error>
+		<!-- You can show a generic message -->
+		<p>Something went wrong. Please try again later.</p>
+		
+		<!-- Or display a custom fallback component -->
+		<FallbackUI {error} />
+	</div>
+</svelte:boundary>
+
+<p>The rest of the app continues to render.</p>
 ```
+
+**Inside the fallback:**
+
+The `let:error` directive exposes the error object to your fallback template.
+
+```html
+<!-- FallbackUI.svelte -->
+<script lang="ts">
+	let { error }: { error: any } = $props();
+</script>
+
+<div class="error-boundary">
+	<h2>An Error Occurred</h2>
+	<p>We're sorry, something didn't work as expected.</p>
+
+	{#if import.meta.env.DEV}
+		<pre>{error.stack}</pre>
+	{/if}
+</div>
+```
+
+### 2. Error Propagation
+
+- An error thrown inside a component will bubble up to the nearest `<svelte:boundary>`.
+- If there is no boundary, the error will propagate up until it is caught by SvelteKit's top-level error handling (for SvelteKit apps) or crashes the app.
+- Boundaries do not catch errors that happen asynchronously, such as in a `setTimeout` callback, unless the error is thrown during the rendering phase.
 
 ## Testing Considerations
 
@@ -881,6 +923,120 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 - **Future-proofing**: Watch Pattern 3 (Remote Functions) - may become the standard
 - **Avoid**: Pattern 1 (Client Fetch) - unless you have specific requirements
 
+---
+## SvelteKit Error Handling
+
+SvelteKit has a robust and centralized system for handling errors, distinguishing between *expected* errors (like "Not Found") and *unexpected* errors (bugs).
+
+### 1. Expected Errors (`error` helper)
+
+When you can anticipate an error condition (e.g., user lacks permissions, requested item doesn't exist), use the `error` helper from `@sveltejs/kit`.
+
+- **MUST** be thrown from `.server.ts` files (`load`, actions) or API routes (`+server.ts`).
+- It takes an HTTP status code and an optional message.
+- Calling `error()` will interrupt execution and render the appropriate error page.
+
+**Rule:** Always use the `error` helper for predictable failure states instead of throwing a generic `Error`.
+
+```typescript
+// src/routes/posts/[slug]/+page.server.ts
+import { error } from '@sveltejs/kit';
+import type { PageServerLoad } from './$types';
+import { db } from '$lib/server/db';
+
+export const load: PageServerLoad = async ({ params }) => {
+	const post = await db.getPost(params.slug);
+
+	if (!post) {
+		// This generates a 404 Not Found error page
+		error(404, {
+			message: `No post found with slug "${params.slug}"`
+		});
+	}
+
+	return { post };
+};
+```
+
+### 2. Unexpected Errors (Bugs)
+
+Any error that is *not* thrown using the `error` helper is considered an "unexpected error" or a bug.
+
+- **On the server:** SvelteKit catches it, logs it to the console, and renders a generic 500 Internal Error page to the user for security.
+- **In the browser:** The error is logged to the browser console but may crash the client-side app if not handled by a `<svelte:boundary>`.
+
+### 3. Custom Error Pages (`+error.svelte`)
+
+SvelteKit uses a hierarchy to find the appropriate error page to render. It will search for the closest `+error.svelte` file up the route tree from where the error occurred.
+
+- `src/routes/+error.svelte` is the global, default error page.
+- `src/routes/admin/+error.svelte` would handle any errors occurring within the `/admin` route group.
+
+The component receives error information via the `page` store.
+
+**Rule:** ALWAYS create a root `src/routes/+error.svelte` file to provide a branded, user-friendly error experience.
+
+**Example `src/routes/+error.svelte`:**
+
+```html
+<script lang="ts">
+	import { page } from '$app/stores';
+</script>
+
+<div class="error-container">
+	<h1>{$page.status}</h1>
+	<p>{$page.error?.message}</p>
+
+	{#if import.meta.env.DEV && $page.error?.stack}
+		<h2>Stack Trace</h2>
+		<pre>{$page.error.stack}</pre>
+	{/if}
+</div>
+```
+
+### 4. The `handleError` Hook (Centralized Logging)
+
+For systematically handling all unexpected errors (e.g., logging them to a service like Sentry or LogRocket), use the `handleError` hook in `hooks.server.ts` and/or `hooks.client.ts`.
+
+- It runs for **unexpected errors only**.
+- It receives the `error`, the `event` (server-side), and returns an object that will be exposed to `+error.svelte` via `$page.error`.
+
+**Rule:** Implement `handleError` in `hooks.server.ts` for robust server-side error logging. Only include sensitive information if you are certain it will be stripped before being sent to the client.
+
+**Example `src/hooks.server.ts`:**
+
+```typescript
+import type { Handle, HandleServerError } from '@sveltejs/kit';
+import { logToExternalService } from '$lib/server/logging';
+
+// This is the HandleServerError type
+export const handleError: HandleServerError = async ({ error, event }) => {
+	// `error` is the unexpected error
+	// `event` is the SvelteKit request event
+	
+	const errorId = crypto.randomUUID();
+
+	// Log the error to an external service
+	logToExternalService({
+		id: errorId,
+		error,
+		url: event.url.toString(),
+		// etc.
+	});
+
+	// Return a shape that is safe to expose to the user.
+	// This object is available in +error.svelte as $page.error
+	return {
+		message: 'Whoops! Something went wrong.',
+		errorId: errorId,
+		// Do NOT return the original error or stack trace here!
+	};
+};
+
+// ... your existing `handle` function (if any)
+```
+
+By combining these tools, you can create a robust error handling strategy that gracefully manages both expected and unexpected issues.
 
 ## Misc.
 ### 1. URL State Patterns
