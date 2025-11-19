@@ -456,8 +456,7 @@ For SvelteKit applications, use context for state that needs to be shared within
 import { setContext } from 'svelte';
 import { createUserStore } from './userStore.svelte.ts';
 
-const userStore = createUserStore(initialUserData);
-setContext('userStore', userStore);
+setContext('userStore', createUserStore(initialUserData));
 
 // In child components
 import { getContext } from 'svelte';
